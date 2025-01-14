@@ -1,0 +1,449 @@
+import { useState, useEffect, useCallback } from "react";
+import { ethers } from "ethers";
+import VotingSystemABI from "./VotingSystemABI.json";
+import LanguageSwitcher from "./LanguageSwitcher";
+import { Menu, X } from "lucide-react";
+
+const contractAddress = "0x7EF2e0048f5bAeDe046f6BF797943daF4ED8CB47";
+
+const App = () => {
+  const [currentAccount, setCurrentAccount] = useState(null);
+  const [proposals, setProposals] = useState([]);
+  const [selectedProposal, setSelectedProposal] = useState(null);
+  const [language, setLanguage] = useState("en");
+  const [isLoading, setIsLoading] = useState(false);
+  const [hasVoted, setHasVoted] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  const translations = {
+    en: {
+      title: "Decentralized Voting System",
+      proposals: "Proposals",
+      vote: "Vote",
+      voted: "Already Voted",
+      selectProposal: "Select a proposal to vote",
+      connect: "Connect Wallet",
+      success: "Vote cast successfully!",
+      connected: "Connected Account: ",
+    },
+    ha: {
+      title: "Tsarin Zaɓen Tsara Tsara",
+      proposals: "Shawarwari",
+      vote: "Zaɓi",
+      voted: "An riga an kada ƙuri'a",
+      selectProposal: "Zaɓi shawarar da za ku kada kuri'a",
+      connect: "Haɗa Wallet",
+      success: "Kuri'a an yi nasara!",
+      connected: "Asusun da aka haɗa: ",
+    },
+    ig: {
+      title: "Nzọụkwụ Nhọpụta Ahaziri",
+      proposals: "Atụmatụ",
+      vote: "Tinye Votu",
+      voted: "E votela",
+      selectProposal: "Họrọ atụmatụ maka votu",
+      connect: "Jikọta Wallet",
+      success: "Votu kwụsiri ike!",
+      connected: "Akpọkọrọ ọnụahịa: ",
+    },
+    yo: {
+      title: "Eto Idibo Ajọra",
+      proposals: "Awọn Imọran",
+      vote: "Dibo",
+      voted: "Ti dibo tẹlẹ",
+      selectProposal: "Yan imọran lati dibo fun",
+      connect: "Sopọ Apamọwọ",
+      success: "Idibo ti ni aṣeyọri!",
+      connected: "Asopọ ti wa: ",
+    },
+  };
+
+  const getMockProposals = useCallback(
+    () => [
+      { id: 0, name: "Proposal 1: Community Garden Initiative", votes: 15 },
+      { id: 1, name: "Proposal 2: Solar Panel Installation", votes: 23 },
+    ],
+    []
+  );
+
+  const fetchProposals = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const { ethereum } = window;
+      if (!ethereum) {
+        setProposals(getMockProposals());
+        return;
+      }
+
+      const provider = new ethers.providers.Web3Provider(ethereum);
+      const contract = new ethers.Contract(
+        contractAddress,
+        VotingSystemABI,
+        provider
+      );
+      const totalProposals = await contract.proposalCount();
+
+      const fetchedProposals = [];
+      for (let i = 0; i < totalProposals; i++) {
+        const proposal = await contract.getProposal(i);
+        fetchedProposals.push({
+          id: i,
+          name: proposal[0],
+          votes: parseInt(proposal[1]),
+        });
+      }
+
+      setProposals(fetchedProposals);
+    } catch (error) {
+      console.error("Error fetching proposals:", error);
+      setProposals(getMockProposals());
+    } finally {
+      setIsLoading(false);
+    }
+  }, [getMockProposals]);
+
+  useEffect(() => {
+    const checkWalletConnection = async () => {
+      try {
+        const { ethereum } = window;
+        if (!ethereum) {
+          console.log("Make sure you have MetaMask installed!");
+          setProposals(getMockProposals());
+          return;
+        }
+
+        const accounts = await ethereum.request({ method: "eth_accounts" });
+        if (accounts.length !== 0) {
+          setCurrentAccount(accounts[0]);
+          await fetchProposals();
+        } else {
+          setProposals(getMockProposals());
+        }
+      } catch (error) {
+        console.error("Error checking wallet connection:", error);
+        setProposals(getMockProposals());
+      }
+    };
+
+    checkWalletConnection();
+  }, [fetchProposals, getMockProposals]);
+
+  useEffect(() => {
+    const hasUserVoted = localStorage.getItem("hasVoted");
+    if (hasUserVoted === "true") {
+      setHasVoted(true);
+    }
+  }, []);
+
+  const connectWallet = async () => {
+    try {
+      const { ethereum } = window;
+      if (!ethereum) {
+        alert("Please install MetaMask!");
+        return;
+      }
+
+      setIsLoading(true);
+      const accounts = await ethereum.request({
+        method: "eth_requestAccounts",
+      });
+      setCurrentAccount(accounts[0]);
+      await fetchProposals();
+    } catch (error) {
+      console.error("Error connecting wallet:", error);
+      alert("Error connecting to MetaMask. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const castVote = async () => {
+    if (!selectedProposal) return;
+
+    try {
+      setIsLoading(true);
+
+      if (!currentAccount) {
+        setProposals(
+          proposals.map((p) =>
+            p.id === selectedProposal ? { ...p, votes: p.votes + 1 } : p
+          )
+        );
+        setHasVoted(true);
+        localStorage.setItem("hasVoted", "true");
+        alert(translations[language].success);
+        return;
+      }
+
+      const { ethereum } = window;
+      const provider = new ethers.providers.Web3Provider(ethereum);
+      const signer = provider.getSigner();
+      const contract = new ethers.Contract(
+        contractAddress,
+        VotingSystemABI,
+        signer
+      );
+
+      const tx = await contract.vote(selectedProposal);
+      await tx.wait();
+
+      alert(translations[language].success);
+      setHasVoted(true);
+      localStorage.setItem("hasVoted", "true");
+      await fetchProposals();
+    } catch (error) {
+      console.error("Error casting vote:", error);
+      alert("Error casting vote. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const resetVote = useCallback(() => {
+    localStorage.removeItem("hasVoted");
+    setHasVoted(false);
+    setSelectedProposal(null);
+  }, []);
+
+  return (
+    <div className="min-h-screen bg-gray-100 text-gray-800">
+      <header className="sticky top-0 z-50 bg-blue-600 text-white shadow-lg">
+        <div className="max-w-7xl mx-auto">
+          <div className="hidden md:flex justify-between items-center p-4">
+            <h1 className="text-2xl font-bold">
+              {translations[language].title}
+            </h1>
+            <nav>
+              <ul className="flex space-x-6">
+                <li>
+                  <a href="#home" className="hover:underline">
+                    Home
+                  </a>
+                </li>
+                <li>
+                  <a href="#proposals" className="hover:underline">
+                    Proposals
+                  </a>
+                </li>
+                <li>
+                  <a href="#about" className="hover:underline">
+                    About
+                  </a>
+                </li>
+              </ul>
+            </nav>
+            <div className="flex items-center space-x-4">
+              <LanguageSwitcher language={language} setLanguage={setLanguage} />
+              <button
+                onClick={connectWallet}
+                disabled={isLoading}
+                className={`bg-white text-blue-600 py-2 px-4 rounded-lg transition-all
+                  ${
+                    isLoading
+                      ? "opacity-50 cursor-not-allowed"
+                      : "hover:bg-gray-100"
+                  }`}
+              >
+                {isLoading
+                  ? "Connecting..."
+                  : currentAccount
+                  ? `${translations[language].connected}${currentAccount.slice(
+                      0,
+                      6
+                    )}...`
+                  : translations[language].connect}
+              </button>
+            </div>
+          </div>
+
+          <div className="md:hidden">
+            <div className="flex justify-between items-center p-4">
+              <h1 className="text-xl font-bold">
+                {translations[language].title}
+              </h1>
+              <button
+                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                className="p-2 rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+              </button>
+            </div>
+
+            {isMobileMenuOpen && (
+              <div className="bg-blue-700 p-4 space-y-4">
+                <nav>
+                  <ul className="space-y-3">
+                    <li>
+                      <a
+                        href="#home"
+                        className="block hover:bg-blue-600 p-2 rounded"
+                      >
+                        Home
+                      </a>
+                    </li>
+                    <li>
+                      <a
+                        href="#proposals"
+                        className="block hover:bg-blue-600 p-2 rounded"
+                      >
+                        Proposals
+                      </a>
+                    </li>
+                    <li>
+                      <a
+                        href="#about"
+                        className="block hover:bg-blue-600 p-2 rounded"
+                      >
+                        About
+                      </a>
+                    </li>
+                  </ul>
+                </nav>
+                <div className="space-y-3">
+                  <LanguageSwitcher
+                    language={language}
+                    setLanguage={setLanguage}
+                  />
+                  <button
+                    onClick={connectWallet}
+                    disabled={isLoading}
+                    className="w-full bg-white text-blue-600 py-2 px-4 rounded-lg"
+                  >
+                    {isLoading
+                      ? "Connecting..."
+                      : currentAccount
+                      ? `${
+                          translations[language].connected
+                        }${currentAccount.slice(0, 6)}...`
+                      : translations[language].connect}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+        <section id="home" className="mb-8">
+          <div className="bg-white rounded-2xl shadow-md p-6 sm:p-8">
+            <h2 className="text-2xl sm:text-3xl font-bold mb-4">
+              Welcome to <span className="text-blue-600">WEB3Naija</span> Voting System
+            </h2>
+            <p className="text-gray-600 text-base sm:text-lg">
+              Use this platform to participate in decentralized and secure
+              voting. Select a proposal and cast your vote with confidence!
+            </p>
+          </div>
+        </section>
+
+        <section id="proposals" className="mb-8">
+          <div className="bg-white rounded-2xl shadow-md p-6 sm:p-8">
+            <h2 className="text-xl sm:text-2xl font-semibold mb-6">
+              {translations[language].proposals}
+            </h2>
+
+            {isLoading ? (
+              <div className="text-center py-8">
+                <div className="animate-spin w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full mx-auto mb-4"></div>
+                <p className="text-gray-600">Loading proposals...</p>
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+                  {proposals.map((proposal) => (
+                    <div
+                      key={proposal.id}
+                      onClick={() =>
+                        !hasVoted && setSelectedProposal(proposal.id)
+                      }
+                      className={`p-4 sm:p-6 border rounded-xl transition-all duration-200
+                        ${
+                          hasVoted
+                            ? "cursor-not-allowed opacity-75"
+                            : "cursor-pointer hover:shadow-md"
+                        }
+                        ${
+                          selectedProposal === proposal.id
+                            ? "bg-blue-50 border-blue-300 shadow-md"
+                            : "bg-white hover:bg-gray-50"
+                        }`}
+                    >
+                      <h3 className="text-lg sm:text-xl font-bold mb-2">
+                        {proposal.name}
+                      </h3>
+                      <div className="flex justify-between items-center">
+                        <p className="text-gray-600">
+                          Current Votes: {proposal.votes}
+                        </p>
+                        {selectedProposal === proposal.id && (
+                          <span className="text-blue-600 text-sm">
+                            Selected
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                  {!hasVoted && selectedProposal !== null && (
+                    <button
+                      onClick={castVote}
+                      disabled={isLoading}
+                      className="w-full sm:w-auto bg-blue-600 text-white py-3 px-8 rounded-lg
+                        hover:bg-blue-700 transition-colors disabled:opacity-50 
+                        disabled:cursor-not-allowed text-lg font-medium"
+                    >
+                      {translations[language].vote}
+                    </button>
+                  )}
+
+                  {hasVoted && (
+                    <div className="flex items-center space-x-2">
+                      <span className="text-green-600 font-medium">
+                        {translations[language].voted}
+                      </span>
+                      <button
+                        onClick={resetVote}
+                        className="text-sm text-blue-600 hover:underline"
+                      >
+                        Reset Vote (Testing Only)
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </section>
+
+        <section id="about">
+          <div className="bg-white rounded-2xl shadow-md p-6 sm:p-8">
+            <h2 className="text-xl sm:text-2xl font-semibold mb-4">
+              About This Platform
+            </h2>
+            <p className="text-gray-600 text-base sm:text-lg">
+              This decentralized voting system leverages blockchain technology
+              to ensure secure, transparent, and fraud-free elections. Your vote
+              is stored on the blockchain, making it immutable and tamper-proof.
+            </p>
+          </div>
+        </section>
+      </main>
+
+      <footer className="bg-blue-600 text-white mt-12">
+        <div className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+          <div className="text-center sm:text-left">
+            <p className="text-sm sm:text-base">
+              &copy; {new Date().getFullYear()} Decentralized Voting System. All
+              rights reserved.
+            </p>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+};
+
+export default App;  
